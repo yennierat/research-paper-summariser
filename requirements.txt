@@ -1,0 +1,9 @@
+openai
+pydantic
+requests
+psycopg[binary]
+python-dotenv
+numpy
+scikit-learn
+sentence-transformers
+pytest
