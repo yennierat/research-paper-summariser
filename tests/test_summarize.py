@@ -1,5 +1,5 @@
 import httpx2
-import openai
+from langfuse.openai import openai
 from src.summarize import Summary, Section, missing_numbers, describe_error
 
 REQUEST = httpx2.Request("POST", "https://openrouter.ai/api/v1/chat/completions")

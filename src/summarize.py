@@ -2,7 +2,7 @@ import os
 import re
 import time
 import logging
-from openai import OpenAI, APIConnectionError, APIStatusError, RateLimitError
+from langfuse.openai import OpenAI, openai
 from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
@@ -61,10 +61,10 @@ def missing_numbers(summary: Summary, source: str) -> list[str]:
 
 def describe_error(e: Exception) -> str:
     """One readable line for an alert. The client has already retried 429s and 5xx by the time we see them."""
-    if isinstance(e, RateLimitError):
+    if isinstance(e, openai.RateLimitError):
         return "OpenRouter rate limit (HTTP 429), still failing after retries"
-    if isinstance(e, APIStatusError):
+    if isinstance(e, openai.APIStatusError):
         return f"OpenRouter HTTP {e.status_code}: {e.message[:200]}"
-    if isinstance(e, APIConnectionError):
+    if isinstance(e, openai.APIConnectionError):
         return "could not reach OpenRouter"
     return f"{type(e).__name__}: {e}"
