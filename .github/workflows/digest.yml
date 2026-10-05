@@ -17,10 +17,13 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - run: pip install requests "psycopg[binary]" numpy sentence-transformers openai pydantic python-dotenv
+      - run: pip install requests "psycopg[binary]" numpy sentence-transformers openai langfuse pydantic python-dotenv
       - run: python -m src.main
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_HOST: ${{ secrets.LANGFUSE_HOST }}
