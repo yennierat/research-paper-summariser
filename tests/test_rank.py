@@ -24,8 +24,8 @@ class FakeModel:
 
 
 class RankConn:
-    def __init__(self, candidates):
-        self.candidates, self.updates = candidates, []
+    def __init__(self, candidates, rated=()):
+        self.candidates, self.rated, self.updates = candidates, list(rated), []
 
     def execute(self, sql, params=None):
         self.last = sql
@@ -34,7 +34,9 @@ class RankConn:
         return self
 
     def fetchall(self):
-        return self.candidates if "selected_at is null" in self.last else []
+        if "selected_at is null" in self.last:
+            return self.candidates
+        return self.rated if "join papers p using" in self.last else []
 
     def fetchone(self):
         return None
@@ -90,6 +92,34 @@ def test_rank_stores_features_used_for_training():
     assert embedding == pytest.approx([1.0, 0.0])
     assert features[0] == pytest.approx(1.0)
     assert features[4] == pytest.approx(1.0, abs=0.01)
+
+
+def stored_features(rated):
+    conn = RankConn([candidate("close"), candidate("far")], rated)
+    rank.rank(conn, n=2)
+    return {arxiv_id: features for _, features, arxiv_id in conn.updates}
+
+
+def test_likes_and_dislikes_shape_features():
+    f = stored_features([([1.0, 0.0], "like"), ([0.0, 1.0], "dislike")])
+    assert f["id-close"][1:3] == pytest.approx([1.0, 0.0])
+    assert f["id-far"][1:3] == pytest.approx([0.0, 1.0])
+
+
+def test_save_counts_as_liked():
+    f = stored_features([([0.0, 1.0], "save")])
+    assert f["id-far"][1:3] == pytest.approx([1.0, 0.0])
+
+
+def test_liked_centroid_is_normalised_mean():
+    f = stored_features([([1.0, 0.0], "like"), ([0.0, 1.0], "like")])
+    assert f["id-close"][1] == pytest.approx(2 ** -0.5)
+
+
+def test_feedback_changes_what_gets_picked():
+    papers = [candidate("close"), candidate("medium"), candidate("far")]
+    assert rank.rank(RankConn(papers), n=1) == ["id-close"]
+    assert rank.rank(RankConn(papers, [([0.0, 1.0], "like")]), n=1) == ["id-medium"]
 
 
 def test_rank_with_no_candidates_returns_nothing():
