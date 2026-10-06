@@ -2,6 +2,9 @@ import os
 import re
 import time
 import logging
+from urllib.parse import urlparse
+import psycopg
+import requests
 from langfuse.openai import OpenAI, openai
 from pydantic import BaseModel
 
@@ -67,4 +70,9 @@ def describe_error(e: Exception) -> str:
         return f"OpenRouter HTTP {e.status_code}: {e.message[:200]}"
     if isinstance(e, openai.APIConnectionError):
         return "could not reach OpenRouter"
+    if isinstance(e, requests.RequestException):
+        host = urlparse(e.request.url).hostname if e.request is not None else "remote host"
+        return f"{type(e).__name__} reaching {host}"
+    if isinstance(e, psycopg.Error):
+        return f"database error ({type(e).__name__})"
     return f"{type(e).__name__}: {e}"

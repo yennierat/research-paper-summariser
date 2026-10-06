@@ -1,4 +1,6 @@
 import httpx2
+import psycopg
+import requests
 from langfuse.openai import openai
 from src.summarize import Summary, Section, missing_numbers, describe_error
 
@@ -39,6 +41,17 @@ def test_other_http_errors_show_the_status():
 
 def test_connection_errors_are_described():
     assert describe_error(openai.APIConnectionError(request=REQUEST)) == "could not reach OpenRouter"
+
+
+def test_request_errors_name_the_host_but_not_the_url():
+    req = requests.Request("POST", "https://api.telegram.org/botSECRET-TOKEN/sendMessage")
+    e = requests.ConnectionError("HTTPSConnectionPool ... url: /botSECRET-TOKEN/sendMessage", request=req)
+    assert describe_error(e) == "ConnectionError reaching api.telegram.org"
+
+
+def test_database_errors_hide_the_message():
+    e = psycopg.ProgrammingError('invalid connection option ""postgresql://user:SECRET-PW@ep-host.neon.tech/db')
+    assert describe_error(e) == "database error (ProgrammingError)"
 
 
 def test_unknown_errors_keep_type_and_message():
