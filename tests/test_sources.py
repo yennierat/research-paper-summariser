@@ -1,4 +1,6 @@
 from datetime import datetime, timezone
+import pytest
+import requests
 from src import sources
 from tests.fakes import FakeResponse
 
@@ -63,3 +65,70 @@ def test_fetch_hf_parses_paper(monkeypatch):
     assert p.hf_upvotes == 5
     assert p.categories == []
     assert p.published.tzinfo is not None
+
+
+@pytest.fixture
+def sleeps(monkeypatch):
+    waits = []
+    monkeypatch.setattr(sources.time, "sleep", waits.append)
+    return waits
+
+
+def responses(*items):
+    """Fake requests.get that returns (or raises) each item in turn."""
+    calls = []
+
+    def get(*a, **k):
+        item = items[len(calls)]
+        calls.append(1)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    return get, calls
+
+
+def ok_feed():
+    return FakeResponse(content=arxiv_feed("http://arxiv.org/abs/2610.02207v1"))
+
+
+def test_fetch_arxiv_retries_with_exponential_backoff(monkeypatch, sleeps):
+    get, calls = responses(FakeResponse(status_code=503), requests.ConnectionError("reset"),
+                           requests.ReadTimeout("slow"), ok_feed())
+    monkeypatch.setattr(sources.requests, "get", get)
+    assert sources.fetch_arxiv()[0].arxiv_id == "2610.02207"
+    assert sleeps == [5, 10, 20]
+
+
+def test_fetch_arxiv_honours_retry_after(monkeypatch, sleeps):
+    get, _ = responses(FakeResponse(status_code=429, headers={"Retry-After": "30"}),
+                       FakeResponse(status_code=503, headers={"Retry-After": "9999"}), ok_feed())
+    monkeypatch.setattr(sources.requests, "get", get)
+    sources.fetch_arxiv()
+    assert sleeps == [30, sources.MAX_RETRY_AFTER]
+
+
+def test_fetch_arxiv_gives_up_after_max_tries(monkeypatch, sleeps):
+    get, calls = responses(*[FakeResponse(status_code=503)] * sources.ARXIV_TRIES)
+    monkeypatch.setattr(sources.requests, "get", get)
+    with pytest.raises(requests.HTTPError):
+        sources.fetch_arxiv()
+    assert len(calls) == sources.ARXIV_TRIES
+    assert sleeps == [5, 10, 20, 40]
+
+
+def test_fetch_arxiv_reraises_last_connection_error(monkeypatch, sleeps):
+    get, calls = responses(*[requests.ConnectionError("reset")] * sources.ARXIV_TRIES)
+    monkeypatch.setattr(sources.requests, "get", get)
+    with pytest.raises(requests.ConnectionError):
+        sources.fetch_arxiv()
+    assert len(calls) == sources.ARXIV_TRIES
+
+
+def test_fetch_arxiv_does_not_retry_client_errors(monkeypatch, sleeps):
+    get, calls = responses(FakeResponse(status_code=400))
+    monkeypatch.setattr(sources.requests, "get", get)
+    with pytest.raises(requests.HTTPError):
+        sources.fetch_arxiv()
+    assert len(calls) == 1
+    assert sleeps == []

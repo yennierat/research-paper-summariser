@@ -1,9 +1,14 @@
+import requests
+
+
 class FakeResponse:
-    def __init__(self, ok=True, status_code=200, content=b"", data=None, text=""):
+    def __init__(self, ok=True, status_code=200, content=b"", data=None, text="", headers=None):
         self.ok, self.status_code, self.content, self._data, self.text = ok, status_code, content, data, text
+        self.headers = headers or {}
 
     def raise_for_status(self):
-        pass
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"{self.status_code} error", response=self)
 
     def json(self):
         return self._data
