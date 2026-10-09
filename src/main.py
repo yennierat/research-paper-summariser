@@ -1,4 +1,5 @@
 import logging
+from langfuse import observe, get_client
 from src.db import connect
 from src.ingest import ingest
 from src.poller import poll
@@ -17,6 +18,20 @@ def alert(text: str) -> None:
         log.exception("could not send alert")
 
 
+@observe(name="paper", capture_input=False)  # args include the Telegram client, which holds the bot token
+def send_paper(summarizer: Summarizer, tg: Telegram, arxiv_id: str, title: str, abstract: str) -> None:
+    get_client().update_current_span(input={"arxiv_id": arxiv_id, "title": title})
+    s = summarizer.summarize(title, abstract)
+    missing = missing_numbers(s, abstract)
+    if missing:
+        get_client().update_current_span(level="WARNING", metadata={"missing_numbers": missing},
+                                         status_message="results cite numbers not in the abstract")
+    text = "\n\n".join([s.intro.short, s.results.short, s.discussion.short])
+    tg.send_text(format_card(arxiv_id, title, text, MODEL),
+                 reply_markup=feedback_buttons(arxiv_id))
+
+
+@observe(name="digest")
 def digest() -> None:
     """Fetch, rank and send today's papers. Uses the hand-set weights until retrain promotes a model."""
     try:
@@ -33,6 +48,7 @@ def digest() -> None:
     tg = Telegram()
     if not ids:
         tg.send_text("No new papers today.", parse_mode=None)
+        get_client().update_current_span(output="no new papers")
         return
 
     papers = {r[0]: r for r in rows}
@@ -41,15 +57,13 @@ def digest() -> None:
     for arxiv_id in ids:
         _, title, abstract = papers[arxiv_id]
         try:
-            s = summarizer.summarize(title, abstract)
-            missing_numbers(s, abstract)
-            text = "\n\n".join([s.intro.short, s.results.short, s.discussion.short])
-            tg.send_text(format_card(arxiv_id, title, text, MODEL),
-                         reply_markup=feedback_buttons(arxiv_id))
+            send_paper(summarizer, tg, arxiv_id, title, abstract)
         except Exception as e:
             log.exception("failed to summarize or send %s, skipping", arxiv_id)
             failures[arxiv_id] = describe_error(e)
     log.info("sent %d of %d papers", len(ids) - len(failures), len(ids))
+    get_client().update_current_span(
+        output={"picked": ids, "sent": len(ids) - len(failures), "failed": failures})
     if failures:
         with connect() as conn:
             unpick(conn, list(failures))

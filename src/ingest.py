@@ -1,4 +1,5 @@
 import logging
+from langfuse import observe, get_client
 from src.db import connect
 from src.sources import Paper, fetch_arxiv, fetch_hf
 
@@ -26,6 +27,7 @@ def prune(conn) -> int:
     ).rowcount
 
 
+@observe(name="ingest")
 def ingest() -> None:
     papers = fetch_arxiv()
     log.info("fetched %d papers from arXiv", len(papers))
@@ -40,6 +42,7 @@ def ingest() -> None:
         deleted = prune(conn)
     log.info("saved %d papers, pruned %d unpicked papers older than %d days",
              len(papers), deleted, RETENTION_DAYS)
+    get_client().update_current_span(output={"fetched": len(papers), "pruned": deleted})
 
 
 if __name__ == "__main__":

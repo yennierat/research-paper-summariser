@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime, timezone
 import numpy as np
+from langfuse import observe, get_client
 from sentence_transformers import SentenceTransformer
 from src.ranker import build_features, active_model, LATEST_FEEDBACK, POSITIVE
 from src.sources import ARXIV_CATEGORIES
@@ -35,12 +36,14 @@ def pick(order: list[int], categories: list[list[str]], n: int) -> list[int]:
     return sorted(picks[:n], key=order.index)
 
 
+@observe(name="rank", capture_input=False)  # conn would expose the DATABASE_URL
 def rank(conn, n: int = TOP_N) -> list[str]:
     candidates = conn.execute(
         "select arxiv_id, title, abstract, hf_upvotes, published, categories from papers"
         " where selected_at is null and published > now() - make_interval(days => %s)",
         (CANDIDATE_DAYS,),
     ).fetchall()
+    get_client().update_current_span(metadata={"candidates": len(candidates)})
     if not candidates:
         return []
 

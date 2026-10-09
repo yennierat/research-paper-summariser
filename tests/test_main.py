@@ -63,6 +63,21 @@ def test_sends_one_card_with_buttons_per_pick_in_rank_order(fake):
     assert not conn.statements("selected_at = null")
 
 
+def test_paper_with_invented_numbers_is_still_sent(fake, monkeypatch):
+    class Inventing(FakeSummarizer):
+        def summarize(self, title, text):
+            s = super().summarize(title, text)
+            s.results.short = "Accuracy reached 99.9%."
+            return s
+
+    tg, conn = fake(IDS, ROWS)
+    monkeypatch.setattr(main, "Summarizer", Inventing)
+    main.digest()
+    assert len(tg.messages) == 5
+    assert all("99.9%" in text for text, _ in tg.messages)
+    assert not conn.statements("selected_at = null")
+
+
 def test_failed_paper_is_skipped_unpicked_and_reported(fake, monkeypatch):
     monkeypatch.setattr(FakeSummarizer, "fail_on", "Title 2610.00002")
     tg, conn = fake(IDS, ROWS)
