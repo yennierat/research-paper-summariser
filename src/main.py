@@ -4,7 +4,8 @@ from src.db import connect
 from src.ingest import ingest
 from src.poller import poll
 from src.rank import rank, unpick
-from src.summarize import Summarizer, MODEL, missing_numbers, describe_error
+from src.sources import paper_text
+from src.summarize import Summarizer, Summary, MODEL, missing_numbers, describe_error
 from src.telegram import Telegram, format_card, feedback_buttons
 
 log = logging.getLogger(__name__)
@@ -19,16 +20,18 @@ def alert(text: str) -> None:
 
 
 @observe(name="paper", capture_input=False)  # args include the Telegram client, which holds the bot token
-def send_paper(summarizer: Summarizer, tg: Telegram, arxiv_id: str, title: str, abstract: str) -> None:
-    get_client().update_current_span(input={"arxiv_id": arxiv_id, "title": title})
-    s = summarizer.summarize(title, abstract)
-    missing = missing_numbers(s, abstract)
+def send_paper(summarizer: Summarizer, tg: Telegram, arxiv_id: str, title: str, abstract: str) -> Summary:
+    text, source = paper_text(arxiv_id, abstract)
+    get_client().update_current_span(input={"arxiv_id": arxiv_id, "title": title}, metadata=source)
+    s = summarizer.summarize(title, text)
+    missing = missing_numbers(s, text)
     if missing:
         get_client().update_current_span(level="WARNING", metadata={"missing_numbers": missing},
-                                         status_message="results cite numbers not in the abstract")
-    text = "\n\n".join([s.intro.short, s.results.short, s.discussion.short])
-    tg.send_text(format_card(arxiv_id, title, text, MODEL),
+                                         status_message="results cite numbers not in the source text")
+    card = "\n\n".join([s.intro, s.results, s.discussion])
+    tg.send_text(format_card(arxiv_id, title, card, MODEL),
                  reply_markup=feedback_buttons(arxiv_id))
+    return s
 
 
 @observe(name="digest")

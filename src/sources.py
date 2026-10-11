@@ -4,6 +4,7 @@ import logging
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime
+from html.parser import HTMLParser
 import requests
 
 log = logging.getLogger(__name__)
@@ -15,6 +16,15 @@ BACKOFF_BASE = 5  # arXiv asks for at least 3s between requests
 MAX_RETRY_AFTER = 120
 RETRY_STATUSES = {429, 500, 502, 503, 504}
 NS = {"a": "http://www.w3.org/2005/Atom"}
+
+FULLTEXT_TRIES = 3
+FULLTEXT_MAX_CHARS = 100_000  # ~25k tokens; 4 of 5 sampled papers (40k-105k chars) fit whole
+VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
+SKIP_TAGS = {"head", "script", "style", "nav", "header", "footer", "button", "form", "svg"}
+SKIP_CLASSES = {"ltx_bibliography", "ltx_TOC", "ltx_toclist", "ltx_appendix", "ltx_authors",
+                "ltx_eqn_table"}  # display equations are tables of inline math, so display="block" misses them
+BLOCK_TAGS = {"p", "div", "section", "article", "li", "tr", "table", "figcaption", "caption",
+              "h1", "h2", "h3", "h4", "h5", "h6"}
 
 
 @dataclass
@@ -79,6 +89,98 @@ def fetch_arxiv(max_results: int = ARXIV_MAX_RESULTS) -> list[Paper]:
             categories=[c.get("term") for c in e.findall("a:category", NS)],
         ))
     return papers
+
+
+class _PaperText(HTMLParser):
+    """Plain text of an arXiv (LaTeXML) HTML paper. Inline math becomes its LaTeX alttext, so numbers
+    written in math mode ($70.24\\%$) survive; display equations, references, TOC and appendix are dropped."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.lines, self.line = [], []
+        self.stack = []  # (tag, whether it started a skipped subtree, whether it is the <article>)
+        self.skipping = 0
+        self.in_article = 0  # text outside <article> is arXiv's page chrome (banners, license, menus)
+
+    def _reading(self) -> bool:
+        return self.in_article > 0 and not self.skipping
+
+    def handle_starttag(self, tag, attrs):
+        if tag in VOID_TAGS:
+            return
+        a = dict(attrs)
+        skip = False
+        if self._reading():
+            if tag == "math":
+                if a.get("display") != "block":
+                    self.line.append(f" {a.get('alttext') or ''} ")
+                skip = True  # the MathML children would repeat the alttext
+            elif tag in SKIP_TAGS or SKIP_CLASSES & set((a.get("class") or "").split()):
+                skip = True
+            elif tag in ("td", "th") and "".join(self.line).strip():
+                self.line.append(" | ")
+        article = tag == "article"
+        self.stack.append((tag, skip, article))
+        self.skipping += skip
+        self.in_article += article
+
+    def handle_endtag(self, tag):
+        if tag in VOID_TAGS or all(t != tag for t, _, _ in self.stack):
+            return
+        reading = self._reading()
+        while self.stack:  # also closes tags the page left open
+            t, skip, article = self.stack.pop()
+            self.skipping -= skip
+            self.in_article -= article
+            if t == tag:
+                break
+        if reading and tag in BLOCK_TAGS:
+            self._end_line()
+
+    def handle_data(self, data):
+        if self._reading():
+            self.line.append(data)
+
+    def _end_line(self):
+        if line := _clean("".join(self.line)):
+            self.lines.append(line)
+        self.line = []
+
+    def text(self) -> str:
+        self._end_line()
+        return "\n".join(self.lines)
+
+
+def fetch_fulltext(arxiv_id: str) -> str | None:
+    """Text of the paper's arXiv HTML version, or None when it has none (conversion lags for new papers)."""
+    try:
+        r = _get(f"https://arxiv.org/html/{arxiv_id}", FULLTEXT_TRIES, timeout=30)
+    except requests.RequestException as e:
+        log.warning("no full text for %s (%s), using the abstract", arxiv_id, type(e).__name__)
+        return None
+    if "ltx_document" not in r.text:
+        log.warning("arXiv HTML for %s is not a converted paper, using the abstract", arxiv_id)
+        return None
+    parser = _PaperText()
+    parser.feed(r.text)
+    parser.close()
+    return parser.text() or None
+
+
+def fit(text: str, max_chars: int = FULLTEXT_MAX_CHARS) -> str:
+    """Trim to max_chars, keeping the start (intro) and the end (conclusion)."""
+    if len(text) <= max_chars:
+        return text
+    head = max_chars * 3 // 4
+    return f"{text[:head]}\n[...]\n{text[-(max_chars - head):]}"
+
+
+def paper_text(arxiv_id: str, abstract: str) -> tuple[str, dict]:
+    """What to summarize: the fitted full text when arXiv has it, else the abstract. Plus where it came from."""
+    full = fetch_fulltext(arxiv_id)
+    if full is None:
+        return abstract, {"source": "abstract", "chars": len(abstract), "truncated": False}
+    return fit(full), {"source": "fulltext", "chars": len(full), "truncated": len(full) > FULLTEXT_MAX_CHARS}
 
 
 def fetch_hf() -> list[Paper]:

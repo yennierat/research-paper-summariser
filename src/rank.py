@@ -14,7 +14,7 @@ INTERESTS = (
     "Computer vision. LLM security and cybersecurity: jailbreaks, prompt injection, red teaming, "
     "and using LLMs for security tasks."
 )
-TOP_N = 5
+TOP_N = 3
 CANDIDATE_DAYS = 3
 
 
@@ -32,8 +32,9 @@ def pick(order: list[int], categories: list[list[str]], n: int) -> list[int]:
         best = next((i for i in order if cat in categories[i] and i not in picks), None)
         if best is not None:
             picks.append(best)
+    picks = sorted(picks, key=order.index)[:n]  # with fewer slots than categories, the best winners stay
     picks += [i for i in order if i not in picks][:n - len(picks)]
-    return sorted(picks[:n], key=order.index)
+    return sorted(picks, key=order.index)
 
 
 @observe(name="rank", capture_input=False)  # conn would expose the DATABASE_URL

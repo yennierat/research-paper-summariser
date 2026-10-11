@@ -12,22 +12,19 @@ log = logging.getLogger(__name__)
 
 MODEL = "openai/gpt-6-luna"
 
-PROMPT = """Summarize this research paper for a busy reader.
-For each of intro, results and discussion give:
-- short: 1-2 sentences
-- long: one paragraph
+PROMPT = """Summarize this research paper for a busy reader, in 1-2 sentences per section:
+- intro: the problem and what the paper does about it
+- results: the main findings, with the key numbers and what they are compared against
+- discussion: why it matters and the main limitation
+The text is either the full paper or only its abstract. If it has no concrete results, say so
+plainly instead of guessing. Use plain language and briefly explain any jargon you can't avoid.
 Only use facts and numbers that appear in the text. Do not include links."""
 
 
-class Section(BaseModel):
-    short: str
-    long: str
-
-
 class Summary(BaseModel):
-    intro: Section
-    results: Section
-    discussion: Section
+    intro: str
+    results: str
+    discussion: str
 
 
 class Summarizer:
@@ -56,7 +53,7 @@ class Summarizer:
 def missing_numbers(summary: Summary, source: str) -> list[str]:
     """Numbers in the results summary that don't appear in the source text."""
     nums = lambda s: set(re.findall(r"\d+(?:\.\d+)?", s.replace(",", "")))
-    missing = sorted(nums(summary.results.short + " " + summary.results.long) - nums(source))
+    missing = sorted(nums(summary.results) - nums(source))
     if missing:
         log.warning("results summary has numbers not in source: %s", missing)
     return missing

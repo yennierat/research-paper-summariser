@@ -2,14 +2,13 @@ import httpx2
 import psycopg
 import requests
 from langfuse.openai import openai
-from src.summarize import Summary, Section, missing_numbers, describe_error
+from src.summarize import Summary, missing_numbers, describe_error
 
 REQUEST = httpx2.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
 
 
-def summary(results_short: str, results_long: str = "") -> Summary:
-    other = Section(short="x", long="x")
-    return Summary(intro=other, results=Section(short=results_short, long=results_long), discussion=other)
+def summary(results: str) -> Summary:
+    return Summary(intro="x", results=results, discussion="x")
 
 
 def test_numbers_from_source_pass():
@@ -18,14 +17,12 @@ def test_numbers_from_source_pass():
 
 
 def test_invented_numbers_are_flagged():
-    s = summary("3x faster", "Trained on 12 GPUs.")
+    s = summary("3x faster, trained on 12 GPUs.")
     assert missing_numbers(s, "Much faster, trained on 8 GPUs.") == ["12", "3"]
 
 
 def test_only_results_section_is_checked():
-    s = Summary(intro=Section(short="99 problems", long=""),
-                results=Section(short="no numbers", long=""),
-                discussion=Section(short="", long=""))
+    s = Summary(intro="99 problems", results="no numbers", discussion="")
     assert missing_numbers(s, "") == []
 
 

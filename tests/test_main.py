@@ -2,7 +2,7 @@ import pytest
 
 pytest.importorskip("sentence_transformers")
 from src import main  # noqa: E402
-from src.summarize import Section, Summary  # noqa: E402
+from src.summarize import Summary  # noqa: E402
 from tests.fakes import FakeConn  # noqa: E402
 
 IDS = [f"2610.0000{i}" for i in range(5)]
@@ -23,7 +23,7 @@ class FakeSummarizer:
     def summarize(self, title, text):
         if title == self.fail_on:
             raise RuntimeError("OpenRouter down")
-        return Summary(**{k: Section(short=f"{k} of {title}", long="") for k in ("intro", "results", "discussion")})
+        return Summary(**{k: f"{k} of {title}" for k in ("intro", "results", "discussion")})
 
 
 @pytest.fixture
@@ -35,6 +35,7 @@ def fake(monkeypatch):
         monkeypatch.setattr(main, "ingest", lambda: None)
         monkeypatch.setattr(main, "connect", lambda: conn)
         monkeypatch.setattr(main, "rank", lambda conn: ids)
+        monkeypatch.setattr(main, "paper_text", lambda arxiv_id, abstract: (abstract, {"source": "abstract"}))
         monkeypatch.setattr(main, "Summarizer", FakeSummarizer)
         monkeypatch.setattr(main, "Telegram", lambda: tg)
         return tg, conn
@@ -63,11 +64,26 @@ def test_sends_one_card_with_buttons_per_pick_in_rank_order(fake):
     assert not conn.statements("selected_at = null")
 
 
+def test_summarizes_the_full_text_when_there_is_one(fake, monkeypatch):
+    seen = []
+
+    class Recording(FakeSummarizer):
+        def summarize(self, title, text):
+            seen.append(text)
+            return super().summarize(title, text)
+
+    fake(IDS[:1], ROWS)
+    monkeypatch.setattr(main, "paper_text", lambda arxiv_id, abstract: (f"full text of {arxiv_id}", {}))
+    monkeypatch.setattr(main, "Summarizer", Recording)
+    main.digest()
+    assert seen == [f"full text of {IDS[0]}"]
+
+
 def test_paper_with_invented_numbers_is_still_sent(fake, monkeypatch):
     class Inventing(FakeSummarizer):
         def summarize(self, title, text):
             s = super().summarize(title, text)
-            s.results.short = "Accuracy reached 99.9%."
+            s.results = "Accuracy reached 99.9%."
             return s
 
     tg, conn = fake(IDS, ROWS)

@@ -1,6 +1,6 @@
 # Research Paper Recommender
 
-Every day it pulls new papers from arXiv and Hugging Face Daily Papers, ranks them against your interests and past feedback, summarizes the top 5 with an LLM, and sends each one to Telegram with **Like / Not for me / Save** buttons. Your taps train the ranker.
+Every day it pulls new papers from arXiv and Hugging Face Daily Papers, ranks them against your interests and past feedback, summarizes the top 3 with an LLM (from the full paper when arXiv has an HTML version), and sends each one to Telegram with **Like / Not for me / Save** buttons. Your taps train the ranker.
 
 Three GitHub Actions jobs, no server. They share state only through Postgres (Neon).
 
@@ -19,14 +19,16 @@ GitHub often starts scheduled jobs hours late. Each job can also be run by hand 
 | `main.py` | `digest()` | Runs the daily pipeline: poll → ingest → rank → summarize → send. Papers that fail are returned to the pool. |
 | | `alert(text)` | Sends an `[ALERT]` message to Telegram; never raises. |
 | `sources.py` | `fetch_arxiv()`, `fetch_hf()` | Fetch new papers as `Paper` objects (arXiv IDs without version). |
+| | `paper_text(id, abstract)` | Full text from arXiv's HTML version (no references, TOC or appendix; inline math kept as LaTeX), trimmed by `fit()`; falls back to the abstract. |
 | `ingest.py` | `ingest()` | Saves fetched papers (upsert by arXiv ID), then `prune()` deletes unpicked papers older than 7 days. |
-| `rank.py` | `rank(conn)` | Embeds candidates (all-MiniLM-L6-v2), scores them, picks the top 5 spread across categories, and stores the features used. |
+| `rank.py` | `rank(conn)` | Embeds candidates (all-MiniLM-L6-v2), scores them, picks the top 3 spread across categories, and stores the features used. |
 | | `unpick(conn, ids)` | Returns unsent papers to the candidate pool. |
 | `ranker.py` | `build_features(...)` | The 5 ranking features: similarity to interests, liked papers and disliked papers, log upvotes, age. |
 | | `active_model(conn)` | The active learned weights, or the hand-set defaults. |
 | `summarize.py` | `Summarizer.summarize(title, text)` | One OpenRouter call (traced in Langfuse) returning a structured intro / results / discussion summary. |
 | | `missing_numbers(summary, source)` | Flags numbers in the results summary that aren't in the source text. |
 | | `describe_error(e)` | Readable one-line error for alerts, without secrets. |
+| `try_one.py` | `python -m src.try_one [arxiv_id]` | Prints a fresh summary of one paper; sends nothing, writes nothing. |
 | `telegram.py` | `Telegram.send_text(...)`, `get_updates(...)` | Bot API calls with 3 retries on connection errors. |
 | | `format_card(...)`, `feedback_buttons(id)` | HTML-escaped paper card and its three buttons. |
 | `poller.py` | `poll()` | Saves button taps to the `feedback` table (each tap once). |

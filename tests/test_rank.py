@@ -79,6 +79,11 @@ def test_pick_fills_empty_categories_from_overall_order():
     assert rank.pick([0, 1, 2, 3, 4, 5], cats, 5) == [0, 1, 2, 3, 4]
 
 
+def test_pick_keeps_highest_scoring_category_winners_when_n_is_small():
+    cats = [["cs.CR"], ["cs.CV"], ["cs.LG"], ["cs.CL"], ["cs.AI"]]
+    assert rank.pick([0, 1, 2, 3, 4], cats, 3) == [0, 1, 2]
+
+
 def test_pick_returns_results_in_score_order():
     cats = [["cs.CR"], ["cs.LG"], ["cs.CL"]]
     assert rank.pick([2, 0, 1], cats, 3) == [2, 0, 1]
